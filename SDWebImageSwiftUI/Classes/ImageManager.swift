@@ -13,7 +13,7 @@ import SDWebImage
 /// A Image observable object for handle image load process. This drive the Source of Truth for image loading status.
 /// You can use `@ObservedObject` to associate each instance of manager to your View type, which update your view's body from SwiftUI framework when image was loaded.
 @available(iOS 14.0, macOS 11.0, tvOS 14.0, watchOS 7.0, *)
-public final class ImageManager : ObservableObject {
+public final class ImageManager: ObservableObject {
     /// loaded image, note when progressive loading, this will published multiple times with different partial image
     public var image: PlatformImage? {
         didSet {
@@ -71,70 +71,76 @@ public final class ImageManager : ObservableObject {
     /// - Parameter url: The image url
     /// - Parameter options: The options to use when downloading the image. See `SDWebImageOptions` for the possible values.
     /// - Parameter context: A context contains different options to perform specify changes or processes, see `SDWebImageContextOption`. This hold the extra objects which `options` enum can not hold.
-    public func load(url: URL?, options: SDWebImageOptions = [], context: [SDWebImageContextOption : Any]? = nil) {
+    public func load(url: URL?, options: SDWebImageOptions = [], context: [SDWebImageContextOption: Any]? = nil) {
         let manager: SDWebImageManager
         if let customManager = context?[.customManager] as? SDWebImageManager {
             manager = customManager
         } else {
             manager = .shared
         }
-        if (currentOperation != nil && currentURL == url) {
+        if self.currentOperation != nil && self.currentURL == url {
             return
         }
-        currentURL = url
+        self.currentURL = url
         self.indicatorStatus.isLoading = true
         self.indicatorStatus.progress = 0
-        currentOperation = manager.loadImage(with: url, options: options, context: context, progress: { [weak self] (receivedSize, expectedSize, _) in
-            guard let self = self else {
-                return
+        self.currentOperation = manager.loadImage(
+            with: url,
+            options: options,
+            context: context,
+            progress: { [weak self] (receivedSize, expectedSize, _) in
+                guard let self = self else {
+                    return
+                }
+                let progress: Double
+                if expectedSize > 0 {
+                    progress = Double(receivedSize) / Double(expectedSize)
+                } else {
+                    progress = 0
+                }
+                self.indicatorStatus.progress = progress
+                self.progressBlock?(receivedSize, expectedSize)
+            },
+            completed: { [weak self] (image, data, error, cacheType, finished, _) in
+                guard let self = self else {
+                    return
+                }
+                if let error = error as? SDWebImageError, error.code == .cancelled {
+                    // Ignore user cancelled
+                    // There are race condition when quick scroll
+                    // Indicator modifier disapper and trigger `WebImage.body`
+                    // So previous View struct call `onDisappear` and cancel the currentOperation
+                    return
+                }
+                withTransaction(self.transaction) { // Explicitly use 'self.transaction' here
+                    self.image = image
+                    self.error = error
+                    self.isIncremental = !finished
+                    if finished {
+                        self.imageData = data
+                        self.cacheType = cacheType
+                        self.indicatorStatus.isLoading = false
+                        self.indicatorStatus.progress = 1
+                        if let image = image {
+                            self.successBlock?(image, data, cacheType)
+                        } else {
+                            self.failureBlock?(error ?? NSError())
+                        }
+                    }
+                }
             }
-            let progress: Double
-            if (expectedSize > 0) {
-                progress = Double(receivedSize) / Double(expectedSize)
-            } else {
-                progress = 0
-            }
-            self.indicatorStatus.progress = progress
-            self.progressBlock?(receivedSize, expectedSize)
-        }) { [weak self] (image, data, error, cacheType, finished, _) in
-            guard let self = self else {
-                return
-            }
-            if let error = error as? SDWebImageError, error.code == .cancelled {
-                // Ignore user cancelled
-                // There are race condition when quick scroll
-                // Indicator modifier disapper and trigger `WebImage.body`
-                // So previous View struct call `onDisappear` and cancel the currentOperation
-                return
-            }
-            withTransaction(self.transaction) { // Explicitly use 'self.transaction' here
-    self.image = image
-    self.error = error
-    self.isIncremental = !finished
-    if finished {
-        self.imageData = data
-        self.cacheType = cacheType
-        self.indicatorStatus.isLoading = false
-        self.indicatorStatus.progress = 1
-        if let image = image {
-            self.successBlock?(image, data, cacheType)
-        } else {
-            self.failureBlock?(error ?? NSError())
-        }
+        )
     }
-}
-
     
     /// Cancel the current url loading
     public func cancel() {
-        if let operation = currentOperation {
+        if let operation = self.currentOperation {
             operation.cancel()
-            currentOperation = nil
+            self.currentOperation = nil
         }
-        indicatorStatus.isLoading = false
-        currentURL = nil
+        self.indicatorStatus.isLoading = false
+        self.currentURL = nil
     }
-    
 }
 
 // Completion Handler
