@@ -107,24 +107,23 @@ public final class ImageManager : ObservableObject {
                 // So previous View struct call `onDisappear` and cancel the currentOperation
                 return
             }
-            withTransaction(transaction) {
-                self.image = image
-                self.error = error
-                self.isIncremental = !finished
-                if finished {
-                    self.imageData = data
-                    self.cacheType = cacheType
-                    self.indicatorStatus.isLoading = false
-                    self.indicatorStatus.progress = 1
-                    if let image = image {
-                        self.successBlock?(image, data, cacheType)
-                    } else {
-                        self.failureBlock?(error ?? NSError())
-                    }
-                }
-            }
+            withTransaction(self.transaction) { // Explicitly use 'self.transaction' here
+    self.image = image
+    self.error = error
+    self.isIncremental = !finished
+    if finished {
+        self.imageData = data
+        self.cacheType = cacheType
+        self.indicatorStatus.isLoading = false
+        self.indicatorStatus.progress = 1
+        if let image = image {
+            self.successBlock?(image, data, cacheType)
+        } else {
+            self.failureBlock?(error ?? NSError())
         }
     }
+}
+
     
     /// Cancel the current url loading
     public func cancel() {
